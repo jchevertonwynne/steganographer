@@ -8,7 +8,6 @@ import (
 	"image/png"
 	"io/ioutil"
 	"os"
-	"steganographer/steganography"
 )
 
 // GetFlags gets the image file name, the file to hide and the number of least sig bits to use in hiding
@@ -22,8 +21,8 @@ func GetFlags() (string, string, int, bool) {
 	return *imageFile, *hiddenFile, *lsb, *decode
 }
 
-// CheckValid ensures that the files exist and are of the correct type and size
-func CheckValid(imageFilename, hiddenFilename string, lsb int, decode bool) (image.Image, []byte, error) {
+// Validate ensures that the files exist and are of the correct type and size
+func Validate(imageFilename, hiddenFilename string, lsb int, decode bool) (image.Image, []byte, error) {
 	if imageFilename == "" {
 		return nil, nil, errors.New("please enter an image file name")
 	}
@@ -59,10 +58,6 @@ func CheckValid(imageFilename, hiddenFilename string, lsb int, decode bool) (ima
 
 	if lsb < 1 || lsb > 8 {
 		return nil, nil, errors.New("least sig bits must be between 1 and 8")
-	}
-
-	if !decode && !steganography.CanFit(loadedPNG, hiddenContents, lsb) {
-		return nil, nil, fmt.Errorf("image %q is not large enough to fit %q with %d least sig bit changes", imageFilename, hiddenFilename, lsb)
 	}
 
 	return loadedPNG, hiddenContents, nil

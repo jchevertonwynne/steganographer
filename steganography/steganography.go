@@ -12,25 +12,29 @@ import (
 const headerSize = 32
 
 // CanFit checks if it is possible to put the goal image inside the target file
-func CanFit(im image.Image, contents []byte, lsb int) bool {
-	bitsToHide := len(contents) * 8
-
+func canFit(im image.Image, contents []byte, lsb int) error {
 	maxes := im.Bounds().Max
-	pixels := maxes.X * maxes.Y
-	availiableBits := (pixels * 3 * lsb) - headerSize
+	availiableBytes := ((maxes.X * maxes.Y * 3 * lsb) - headerSize) / 8
 
-	return availiableBits >= bitsToHide
+	if availiableBytes < len(contents) {
+		return fmt.Errorf("only a maximum of %d bytes can be stored using %d least sig bits, target file has %d", availiableBytes/8, lsb, len(contents))
+	}
+
+	return nil
 }
 
 // Encode takes an image, some contents to hide and the number of least sig bits to use. Returns the bytes of the steganopraphised image
 func Encode(im image.Image, contents []byte, lsb int) ([]byte, error) {
+	err := canFit(im, contents, lsb)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode file: %v", err)
+	}
+
 	output := image.NewNRGBA(im.Bounds())
 	draw.Draw(output, im.Bounds(), im, output.Bounds().Min, draw.Src)
 
 	bits := getBits(contents)
-
 	maxX := im.Bounds().Max.X
-
 	shift := 0
 	rgb := 0
 	xInd := 0
@@ -71,7 +75,6 @@ func Encode(im image.Image, contents []byte, lsb int) ([]byte, error) {
 			panic("bad bit value")
 		}
 
-
 		output.SetNRGBA(xInd, yInd, color.NRGBA{r, g, b, a})
 
 		shift++
@@ -90,9 +93,9 @@ func Encode(im image.Image, contents []byte, lsb int) ([]byte, error) {
 	}
 
 	res := new(bytes.Buffer)
-	err := png.Encode(res, output)
+	err = png.Encode(res, output)
 	if err != nil {
-		return nil, fmt.Errorf("failed to hide contents in file: %v", err)
+		return nil, fmt.Errorf("failed to encode file: %v", err)
 	}
 
 	return res.Bytes(), nil
@@ -118,13 +121,16 @@ func getBits(contents []byte) []int {
 }
 
 // Decode attempts to retrive data from a steganographised image
-func Decode(im image.Image, lsb int) []byte {
+func Decode(im image.Image, lsb int) ([]byte, error) {
 	imNGGBA := image.NewNRGBA(im.Bounds())
 	draw.Draw(imNGGBA, im.Bounds(), im, imNGGBA.Bounds().Min, draw.Src)
 
-	var result []byte
+	contentLength, err := getContentsSize(im, lsb)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode: %v", err)
+	}
 
-	contentLength := getContentsSize(im, lsb)
+	var result []byte
 
 	maxX := im.Bounds().Max.X
 	shift := 0
@@ -147,7 +153,7 @@ func Decode(im image.Image, lsb int) []byte {
 			r := col.R
 			g := col.G
 			b := col.B
-	
+
 			switch rgb {
 			case 0:
 				if r&(1<<shift) != 0 {
@@ -164,7 +170,7 @@ func Decode(im image.Image, lsb int) []byte {
 			default:
 				panic("rgb out of index")
 			}
-	
+
 			shift++
 			if shift == lsb {
 				shift = 0
@@ -179,15 +185,23 @@ func Decode(im image.Image, lsb int) []byte {
 				}
 			}
 		}
-		
+
 		result = append(result, byte(currentBit))
 	}
 
-	return result
+	return result, nil
 }
 
-func getContentsSize(im image.Image, lsb int) int {
-	maxX := im.Bounds().Max.X
+func getContentsSize(im image.Image, lsb int) (int, error) {
+	bounds := im.Bounds().Max
+
+	totalStorage := bounds.X * bounds.Y * 3 * lsb
+
+	if totalStorage < 32 {
+		return 0, fmt.Errorf("image is too small to get content size: only %d bits availiable", totalStorage)
+	}
+
+	maxX := bounds.X
 	shift := 0
 	rgb := 0
 	xInd := 0
@@ -230,5 +244,9 @@ func getContentsSize(im image.Image, lsb int) int {
 		}
 	}
 
-	return result
+	if result*8+32 > totalStorage {
+		return 0, fmt.Errorf("image has invalid size: %d bytes is too many to fit in using %d least sig bits", result, lsb)
+	}
+
+	return result, nil
 }
